@@ -1,166 +1,146 @@
 #!/usr/bin/env python3
+
 import subprocess
-import time
 import random
-import sys
+import time
 import os
-from scapy.all import *
-from scapy.layers.dot11 import Dot11, Dot11Beacon, Dot11Elt, Dot11ProbeReq, RadioTap
 
-# Common device names
-DEVICE_NAMES = [
-    "Samsung-Galaxy", "Motorola-Edge", "iPhone-13", "Xiaomi-Redmi", 
-    "Huawei-P30", "OnePlus-9", "Google-Pixel", "OPPO-Find",
-    "Sony-Xperia", "LG-Velvet", "Nokia-8", "iPad-Pro",
-    "Galaxy-Tab", "Surface-Pro", "Kindle-Fire", "Echo-Dot"
-]
+# ==================================
+# CONFIG
+# ==================================
 
-def check_interface(interface):
-    """Check if the wireless interface exists"""
-    try:
-        result = subprocess.run(['iwconfig'], capture_output=True, text=True)
-        if interface in result.stdout:
-            return True
-        print(f"Interface {interface} not found. Available wireless interfaces:")
-        for line in result.stdout.split('\n'):
-            if 'IEEE 802.11' in line:
-                print(f"  {line.split(':')[0]}")
-        return False
-    except:
-        print("Error checking wireless interfaces")
-        return False
+INTERFACE = "wlan0"
+SSID = "YOUR_WIFI"
+PASSWORD = "YOUR_PASSWORD"
 
-def enable_monitor_mode(interface):
-    """Enable monitor mode on the wireless interface"""
-    try:
-        # Kill conflicting processes
-        subprocess.run(['airmon-ng', 'check', 'kill'], check=True, 
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        # Start monitor mode
-        subprocess.run(['airmon-ng', 'start', interface], check=True)
-        mon_interface = interface + 'mon'
-        print(f"Monitor mode enabled on {mon_interface}")
-        return mon_interface
-    except:
-        print("Failed to enable monitor mode with airmon-ng, trying manual method...")
-        try:
-            # Manual method
-            subprocess.run(['ip', 'link', 'set', interface, 'down'], check=True)
-            subprocess.run(['iwconfig', interface, 'mode', 'monitor'], check=True)
-            subprocess.run(['ip', 'link', 'set', interface, 'up'], check=True)
-            print(f"Monitor mode enabled on {interface}")
-            return interface
-        except:
-            print("Failed to enable monitor mode")
-            return None
+ITERATIONS = 25
+WAIT_TIME = 5
 
-def disable_monitor_mode(mon_interface, original_interface):
-    """Disable monitor mode"""
-    try:
-        if mon_interface.endswith('mon'):
-            subprocess.run(['airmon-ng', 'stop', mon_interface], check=True)
-        else:
-            subprocess.run(['ip', 'link', 'set', mon_interface, 'down'], check=True)
-            subprocess.run(['iwconfig', mon_interface, 'mode', 'managed'], check=True)
-            subprocess.run(['ip', 'link', 'set', mon_interface, 'up'], check=True)
-        print("Monitor mode disabled")
-    except:
-        print("Warning: Could not disable monitor mode")
+# ==================================
+# DEVICE DATABASE
+# ==================================
 
-def generate_random_mac():
-    """Generate a random MAC address"""
-    return "%02x:%02x:%02x:%02x:%02x:%02x" % (
-        random.randint(0, 255),
-        random.randint(0, 255),
-        random.randint(0, 255),
-        random.randint(0, 255),
-        random.randint(0, 255),
-        random.randint(0, 255)
+DEVICES = {
+    "Samsung-A10": [
+        "38:2D:E8",
+        "A8:9C:ED",
+        "64:BC:0C"
+    ],
+    "iPhone-13": [
+        "F0:18:98",
+        "AC:BC:32"
+    ],
+    "Xiaomi-Redmi": [
+        "64:09:80",
+        "50:8F:4C"
+    ],
+    "Motorola-G": [
+        "9C:4F:DA",
+        "00:1A:11"
+    ]
+}
+
+# ==================================
+# COMMAND RUNNER
+# ==================================
+
+def run(cmd):
+    print(f"\n[+] {cmd}")
+
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
     )
 
-def create_fake_device(interface, ssid, device_num):
-    """Create a single fake device"""
-    fake_mac = generate_random_mac()
-    device_name = random.choice(DEVICE_NAMES) + str(random.randint(1, 99))
-    
-    print(f"Creating fake device {device_num}: {device_name} ({fake_mac})")
-    
-    try:
-        # Create and send probe request
-        probe_req = RadioTap()/Dot11(addr1='ff:ff:ff:ff:ff:ff', 
-                                    addr2=fake_mac, 
-                                    addr3='ff:ff:ff:ff:ff:ff')/Dot11ProbeReq()/Dot11Elt(ID='SSID', info=ssid)
-        sendp(probe_req, iface=interface, verbose=0)
-        
-        # Create and send authentication request
-        auth_req = RadioTap()/Dot11(addr1='ff:ff:ff:ff:ff:ff', 
-                                   addr2=fake_mac, 
-                                   addr3='ff:ff:ff:ff:ff:ff')/Dot11Auth(seqnum=1)
-        sendp(auth_req, iface=interface, verbose=0)
-        
-        # Create and send association request
-        asso_req = RadioTap()/Dot11(addr1='ff:ff:ff:ff:ff:ff', 
-                                   addr2=fake_mac, 
-                                   addr3='ff:ff:ff:ff:ff:ff')/Dot11AssoReq()/Dot11Elt(ID='SSID', info=ssid)
-        sendp(asso_req, iface=interface, verbose=0)
-        
-        return True
-    except Exception as e:
-        print(f"Error creating device {device_num}: {e}")
-        return False
+    if result.stdout:
+        print(result.stdout.strip())
 
-def main():
-    print("WiFi Fake Device Flooder")
-    print("========================")
-    
-    # Get wireless interface
-    if len(sys.argv) < 2:
-        print("Usage: python3 wifi_flooder.py <interface> [ssid] [num_devices]")
-        print("Example: python3 wifi_flooder.py wlan0 MyNetwork 50")
-        return
-    
-    interface = sys.argv[1]
-    ssid = sys.argv[2] if len(sys.argv) > 2 else input("Enter WiFi SSID: ")
-    num_devices = int(sys.argv[3]) if len(sys.argv) > 3 else 20
-    
-    # Check if interface exists
-    if not check_interface(interface):
-        return
-    
-    # Enable monitor mode
-    mon_interface = enable_monitor_mode(interface)
-    if not mon_interface:
-        return
-    
-    try:
-        print(f"\nStarting to create {num_devices} fake devices for network: {ssid}")
-        print("This will make devices appear as connection requests in your router/admin panel\n")
-        
-        successful = 0
-        for i in range(1, num_devices + 1):
-            if create_fake_device(mon_interface, ssid, i):
-                successful += 1
-            time.sleep(0.2)  # Small delay between devices
-        
-        print(f"\nSuccessfully created {successful}/{num_devices} fake devices")
-        print("Check your router's admin panel or TP-Link Tether app to see the pending connection requests")
-        print("\nPress Ctrl+C to stop monitor mode")
-        
-        # Keep monitor mode running
-        while True:
-            time.sleep(1)
-            
-    except KeyboardInterrupt:
-        print("\nStopping...")
-    finally:
-        # Restore interface to managed mode
-        disable_monitor_mode(mon_interface, interface)
+    if result.stderr:
+        print(result.stderr.strip())
 
-if __name__ == "__main__":
-    # Check if running as root
-    if os.geteuid() != 0:
-        print("This script requires root privileges. Please run with sudo.")
-        sys.exit(1)
-    
-    main()
+    return result.returncode
+
+# ==================================
+# MAC GENERATOR
+# ==================================
+
+def generate_mac(prefix):
+    suffix = [random.randint(0, 255) for _ in range(3)]
+    return prefix + ":" + ":".join(f"{x:02X}" for x in suffix)
+
+# ==================================
+# WIFI FUNCTIONS
+# ==================================
+
+def disconnect():
+    run(f"nmcli dev disconnect {INTERFACE}")
+
+def connect():
+    run(
+        f'nmcli dev wifi connect "{SSID}" '
+        f'password "{PASSWORD}" ifname {INTERFACE}'
+    )
+
+def set_mac(mac):
+    run(f"ip link set {INTERFACE} down")
+    run(f"macchanger -m {mac} {INTERFACE}")
+    run(f"ip link set {INTERFACE} up")
+
+def set_hostname(name):
+    run(f"hostnamectl set-hostname {name}")
+
+# ==================================
+# MAIN
+# ==================================
+
+if os.geteuid() != 0:
+    print("Run as root.")
+    exit()
+
+print("\n=== Fake Device Simulator ===\n")
+
+for i in range(ITERATIONS):
+
+    print("\n" + "=" * 60)
+    print(f"DEVICE {i+1}/{ITERATIONS}")
+
+    # Random device type
+    device = random.choice(list(DEVICES.keys()))
+    prefix = random.choice(DEVICES[device])
+
+    mac = generate_mac(prefix)
+
+    hostname = f"{device}-{random.randint(1000,9999)}"
+
+    print(f"[Device ] {device}")
+    print(f"[MAC    ] {mac}")
+    print(f"[Host   ] {hostname}")
+
+    # Disconnect previous
+    disconnect()
+
+    # Set fake identity
+    set_hostname(hostname)
+    set_mac(mac)
+
+    # Wait interface recovery
+    time.sleep(2)
+
+    # Connect
+    print("\n[+] Connecting...")
+    connect()
+
+    # Stay connected
+    print(f"[+] Waiting {WAIT_TIME}s")
+    time.sleep(WAIT_TIME)
+
+    # Disconnect
+    print("[+] Disconnecting...")
+    disconnect()
+
+    time.sleep(2)
+
+print("\nFinished.")
