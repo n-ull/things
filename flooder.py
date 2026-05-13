@@ -79,10 +79,31 @@ def disconnect():
     run(f"nmcli dev disconnect {INTERFACE}")
 
 def connect():
-    run(
-        f'nmcli dev wifi connect "{SSID}" '
-        f'password "{PASSWORD}" ifname {INTERFACE}'
+
+    # Delete old temp connection
+    run(f'nmcli connection delete fakewifi 2>/dev/null')
+
+    cmd = (
+        f'nmcli connection add '
+        f'type wifi '
+        f'ifname {INTERFACE} '
+        f'con-name fakewifi '
+        f'ssid "{SSID}"'
     )
+
+    run(cmd)
+
+    run(
+        f'nmcli connection modify fakewifi '
+        f'wifi-sec.key-mgmt wpa-psk'
+    )
+
+    run(
+        f'nmcli connection modify fakewifi '
+        f'wifi-sec.psk "{PASSWORD}"'
+    )
+
+    run('nmcli connection up fakewifi')
 
 def set_mac(mac):
     run(f"ip link set {INTERFACE} down")
